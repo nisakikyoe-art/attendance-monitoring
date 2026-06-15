@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Attendance System</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --success: #16a34a;
+            --dark: #1f2937;
+            --light: #f3f4f6;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--light);
+            color: var(--dark);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            color: var(--primary);
+        }
+
+        .scanner-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        #reader {
+            width: 100%;
+            max-width: 450px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #e5e7eb !important;
+        }
+
+        /* Styling html5-qrcode internal buttons to look nicer */
+        #reader button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 0;
+            transition: background 0.2s;
+        }
+        #reader button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .status-message {
+            margin-top: 15px;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            text-align: center;
+            min-height: 20px;
+            width: 100%;
+            max-width: 410px;
+        }
+        .status-success { background-color: #dcfce7; color: #14532d; }
+        .status-error { background-color: #fee2e2; color: #991b1b; }
+
+        .table-section {
+            margin-top: 20px;
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        th {
+            background-color: #f9fafb;
+            color: #4b5563;
+            font-weight: 600;
+        }
+
+        .btn-export {
+            background-color: var(--success);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-export:hover {
+            background-color: #15803d;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>QR Code Attendance System</h1>
+    
+    <div class="scanner-section">
+        <div id="reader"></div>
+        <div id="status" class="status-message" style="display: none;"></div>
+    </div>
+
+    <div class="table-section">
+        <div class="table-header">
+            <h2>Attendance Log (<span id="count">0</span>)</h2>
+            <button class="btn-export" onclick="exportToExcel()">Export to Excel</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>ID / Name (QR Data)</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody id="attendance-list">
+                </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Store scanned attendees to prevent double-scanning in the same session
+    const scannedUsers = new Set();
+    let attendanceData = [];
+    let html5QrcodeScanner;
+
+    function onScanSuccess(decodedText, decodedResult) {
+        const statusDiv = document.getElementById('status');
+        
+        // Check if user already scanned
+        if (scannedUsers.has(decodedText)) {
+            statusDiv.className = "status-message status-error";
+            statusDiv.innerText = `❌ ${decodedText} has already checked in.`;
+            statusDiv.style.display = "block";
+            return;
+        }
+
+        // Successfully scanned a new code
+        scannedUsers.add(decodedText);
+        statusDiv.className = "status-message status-success";
+        statusDiv.innerText = `✅ Checked in: ${decodedText}`;
+        statusDiv.style.display = "block";
+
+        // Get Current Date and Time
+        const now = new Date();
+        const currentDate = now.toLocaleDateString();
+        const currentTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        // Save to temporary array for export
+        attendanceData.push({
+            "ID/Name": decodedText,
+            "Date": currentDate,
+            "Time": currentTime
+        });
+
+        // Update the UI Table
+        updateTable();
+        
+        // Optional: Play a subtle beep sound if desired
+    }
+
+    function onScanFailure(error) {
+        // This callback fires constantly while looking for a QR code. 
+        // We leave it empty to avoid console clutter.
+    }
+
+    function updateTable() {
+        const tbody = document.getElementById('attendance-list');
+        const countSpan = document.getElementById('count');
+        tbody.innerHTML = ""; // Clear existing rows
+
+        attendanceData.forEach((record, index) => {
+            const row = `<tr>
+                <td>${index + 1}</td>
+                <td><strong>${record["ID/Name"]}</strong></td>
+                <td>${record.Date}</td>
+                <td>${record.Time}</td>
+            </tr>`;
+            tbody.innerHTML += row;
+        });
+
+        countSpan.innerText = attendanceData.length;
+    }
+
+    function exportToExcel() {
+        if(attendanceData.length === 0) {
+            alert("No attendance logs found to export!");
+            return;
+        }
+        
+        // Create worksheet from data array
+        const worksheet = XLSX.utils.json_to_sheet(attendanceData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
+
+        // Generate dynamic file name: Attendance_YYYY-MM-DD.xlsx
+        const dateStr = new Date().toISOString().split('T')[0];
+        XLSX.writeFile(workbook, `Attendance_${dateStr}.xlsx`);
+    }
+
+    // Initialize the QR Code Scanner on page load
+    window.addEventListener('DOMContentLoaded', (event) => {
+        html5QrcodeScanner = new Html5QrcodeScanner(
+            "reader", 
+            { 
+                fps: 10, // Frames per second for scanning performance
+                qrbox: { width: 250, height: 250 },
+                rememberLastUsedCamera: true
+            },
+            /* verbose= */ false
+        );
+        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    });
+</script>
+
+</body>
+</html>
